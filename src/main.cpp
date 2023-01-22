@@ -4,7 +4,8 @@
 #include <esp_now.h>
 #include <WiFi.h>
 #include <EthernetBonjour.h>
-#include <ATEMstd.h>
+#include <ATEMmin.h>
+#include <stdint.h>
 
 #define SCK  22
 #define MISO 23
@@ -26,13 +27,14 @@ Server: 4C:75:25:D6:89:D4
 */
 
 #define NUM_PEERS 6
-uint8_t MACs[NUM_PEERS][6] = {
+uint8_t MACs[NUM_PEERS + 1][6] = {
   {0x4C, 0x75, 0x25, 0xD6, 0x89, 0xD4},
   {0x4C, 0x75, 0x25, 0x95, 0x1D, 0xC0},
   {0x4C, 0x75, 0x25, 0x95, 0xB6, 0xD0},
   {0x4C, 0x75, 0x25, 0x95, 0x1D, 0x0C},
   {0xE8, 0x9F, 0x6D, 0x0C, 0xFD, 0x74},
-  {0xE8, 0x9F, 0x6D, 0x0D, 0x33, 0xBC}
+  {0xE8, 0x9F, 0x6D, 0x0D, 0x33, 0xBC},
+  {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 };
 esp_now_peer_info_t peerInfo;
 
@@ -48,14 +50,15 @@ bool SentOK = true;
 bool ServerError = false;
 bool firstRun = true;
 int LightNumber = -1;
-int program = 0;
-int preview = 0;
+uint32_t LightMask = 0;
+uint32_t program = 0;
+uint32_t preview = 0;
 int sendAgain = 0;
 #define SEND_INTERVAL 20
 #define DELAY 50
 
 byte switcherIP[4] = {0, 0, 0, 0};
-ATEMstd atemSwitcher;
+ATEMmin atemSwitcher;
 
 enum Status {
   Searching = 0,
@@ -67,8 +70,8 @@ enum Status {
 // Must match the receiver structure
 typedef struct struct_message {
   //char mac[32];
-  int program;
-  int preview;
+  uint32_t program;
+  uint32_t preview;
   Status state;
 
 } struct_message;
@@ -241,7 +244,7 @@ void setup() {
   peerInfo.encrypt = false;
 
   if(Server) {
-    for(int i = 1; i < NUM_PEERS; ++i)
+    for(int i = 1; i <= NUM_PEERS; ++i)
     {
       memcpy(peerInfo.peer_addr, MACs[i], 6);
       if (esp_now_add_peer(&peerInfo) != ESP_OK){
@@ -271,6 +274,7 @@ void setup() {
         LightNumber = i;
         Serial.print("I am light number ");
         Serial.println(LightNumber);
+        LightMask |= 1UL << i-1;
       }
     }
 
@@ -337,25 +341,32 @@ void loop() {
       //Serial.print(tallySources);
       leds[0] = CRGB::Lime;
       
-      /*
+      program = 0;
+      preview = 0;
       for(int i=0;i<NUM_PEERS;++i) {
         //Serial.printf("%d: ", i);
         uint8_t tallyFlag = atemSwitcher.getTallyByIndexTallyFlags(i);
         if (tallyFlag & TALLY_FLAG_PROGRAM) {
-          myData.program = i;
-          Serial.print("Programm: ");
+          //program |= 1UL << i;
+          program ^= (-1 ^ program) & (1UL << i);
+          //myData.program = i;
+          //Serial.print("Programm: ");
           //Serial.print(i);
         }
         else if (tallyFlag & TALLY_FLAG_PREVIEW) {
-          myData.preview = i;
-          Serial.print(" - Preview: ");
+          //preview |= 1UL << i;
+          preview ^= (-1 ^ preview) & (1UL << i);
+          //myData.preview = i;
+          //Serial.print(" - Preview: ");
           //Serial.print(i);
         }
+        //esp_err_t result = esp_now_send(MACs[i], (uint8_t *) &myData, sizeof(myData));
+        //delay(10);
       }
-      */
       
-      program = atemSwitcher.getProgramInput();
-      preview = atemSwitcher.getPreviewInput();
+      
+      //program = atemSwitcher.getProgramInput();
+      //preview = atemSwitcher.getPreviewInput();
       //Serial.printf("Program: %d - Preview: %d", myData.program, myData.preview);
       //Serial.println();
       if (!atemSwitcher.isConnected()) { // will return false if the connection was lost
@@ -371,11 +382,16 @@ void loop() {
       if(program != myData.program || preview != myData.preview || sendAgain==SEND_INTERVAL) {
         myData.preview = preview;
         myData.program = program;
-        for( int i=1;i<NUM_PEERS;++i){
-          //Serial.println(i);
-          esp_err_t result = esp_now_send(MACs[i], (uint8_t *) &myData, sizeof(myData));
-          delay(10);
-        }
+        //for( int i=1;i<NUM_PEERS;++i){
+        //  //Serial.println(i);
+        //  esp_err_t result = esp_now_send(MACs[i], (uint8_t *) &myData, sizeof(myData));
+        //  delay(10);
+        //}
+        Serial.print(program);
+        Serial.print(" - ");
+        Serial.println(preview);
+
+        esp_err_t result = esp_now_send(MACs[NUM_PEERS], (uint8_t *) &myData, sizeof(myData));
         sendAgain = 0;
       }
       ++sendAgain;
@@ -392,12 +408,13 @@ void loop() {
     }
     else {
       leds[0] = CRGB::Black;
+      
       if(myData.state == Connected) {
         ServerError = false;
-        if(myData.preview == LightNumber) {
+        if(myData.preview & LightMask) {
           leds[0] = CRGB::Lime;
         }
-        if(myData.program == LightNumber) {
+        if(myData.program & LightMask) {
           leds[0] = CRGB::Red;
         }
       }

@@ -1,10 +1,22 @@
-
+/*****************
+ * Basic ATEM Connection
+ * Connects to the Atem Switcher and outputs keep-alive package information
+ *
+ * - kasper
+ */
+/*****************
+ * TO MAKE THIS EXAMPLE WORK:
+ * - You must have an Arduino with Ethernet Shield (or compatible such as "Arduino Ethernet", http://arduino.cc/en/Main/ArduinoBoardEthernet)
+ * - You must have an Atem Switcher connected to the same network as the Arduino - and you should have it working with the desktop software
+ * - You must make specific set ups in the below lines where the comment "// SETUP" is found!
+ */
 
 
 
 // Including libraries: 
 #include <SPI.h>
-#include <Ethernet.h>
+#include <ESP8266WiFi.h>
+//#include <Ethernet.h>
 #include <Streaming.h>
 #include <MemoryFree.h>
 #include <SkaarhojPgmspace.h>
@@ -20,14 +32,11 @@ IPAddress switcherIp(192, 168, 10, 240);     // <= SETUP!  IP address of the ATE
 // Include ATEMbase library and make an instance:
 // The port number is chosen randomly among high numbers.
 #include <ATEMbase.h>
-#include <ATEMmax.h>
-ATEMmax AtemSwitcher;
+#include <ATEMmin.h>
+ATEMmin AtemSwitcher;
 
 
 
-
-unsigned long lastAutoFocus;
-unsigned long lastAutoIris;
 
 void setup() { 
 
@@ -40,16 +49,16 @@ void setup() {
 
   // Initialize a connection to the switcher:
   AtemSwitcher.begin(switcherIp);
-  AtemSwitcher.serialOutput(0x80);
+  AtemSwitcher.serialOutput(2);
   AtemSwitcher.connect();
 
-
-  lastAutoFocus = millis();
-  lastAutoIris = millis() + 2500;
+  // Shows free memory:  
+  Serial << F("freeMemory()=") << freeMemory() << "\n";
 }
 
-bool state = false;
 void loop() {
- AtemSwitcher.setCameraControlVideomode(1, 24, 6, 0);
- AtemSwitcher.runLoop();
+  // Check for packets, respond to them etc. Keeping the connection alive!
+  // VERY important that this function is called all the time - otherwise connection might be lost because packets from the switcher is
+  // overlooked and not responded to.
+    AtemSwitcher.runLoop();
 }
