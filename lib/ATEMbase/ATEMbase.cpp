@@ -48,7 +48,7 @@ void ATEMbase::begin(const IPAddress ip, const uint16_t localPort){
 	waitingForIncoming = false;
 
 		// Set up Udp communication object:
-	#ifdef ESP8266
+	#if defined ESP8266 //|| defined ESP32
 	WiFiUDP Udp;
 	#else
 	EthernetUDP Udp;
@@ -81,6 +81,7 @@ void ATEMbase::connect(const boolean useFixedPortNumber) {
 	_initPayloadSent = false;		// Will be true after initial payload of data is delivered (regular 12-byte ping packages are transmitted.)
 	_hasInitialized = false;		// Will be true after initial payload of data is resent and received well
 	_isConnected = false;			// Will be true after the initial hello-package handshakes.
+	_isRejected = false;			// Will be true if the connection was rejected during hello-package handshakes.
 	_sessionID = 0x53AB;			// Temporary session ID - a new will be given back from ATEM.
 	_lastContact = millis();  		// Setting this, because even though we haven't had contact, it constitutes an attempt that should be responded to at least
 	memset(_missedInitializationPackages, 0xFF, (ATEM_maxInitPackageCount+7)/8);
@@ -98,12 +99,13 @@ void ATEMbase::connect(const boolean useFixedPortNumber) {
 		Serial.println(portNumber);
 	}
 
+	
 	_wipeCleanPacketBuffer();
 	_createCommandHeader(ATEM_headerCmd_HelloPacket, 12+8);
 	_packetBuffer[12] = 0x01;	// This seems to be what the client should send upon first request. 
 	_packetBuffer[9] = 0x3a;	// This seems to be what the client should send upon first request. 
 	
-	_sendPacketBuffer(20);  
+	_sendPacketBuffer(20);
 }
 
 /**
@@ -144,7 +146,8 @@ void ATEMbase::runLoop(uint16_t delayTime) {
 					if (headerBitmask & ATEM_headerCmd_HelloPacket)	{	// Respond to "Hello" packages:
 						_isConnected = true;
 					
-						// _packetBuffer[12]	The ATEM will return a "2" in this return package of same length. If the ATEM returns "3" it means "fully booked" (no more clients can connect) and a "4" seems to be a kind of reconnect (seen when you drop the connection and the ATEM desperately tries to figure out what happened...)
+						_Udp.read(_packetBuffer, 1); // Read 13th byte to get hello packet type.
+						_isRejected = _packetBuffer[0] == 3; // _packetBuffer[12]	The ATEM will return a "2" in this return package of same length. If the ATEM returns "3" it means "fully booked" (no more clients can connect) and a "4" seems to be a kind of reconnect (seen when you drop the connection and the ATEM desperately tries to figure out what happened...)
 						// _packetBuffer[15]	This number seems to increment with about 3 each time a new client tries to connect to ATEM. It may be used to judge how many client connections has been made during the up-time of the switcher?
 						
 						_wipeCleanPacketBuffer();
@@ -176,7 +179,7 @@ void ATEMbase::runLoop(uint16_t delayTime) {
 						#endif
 					} 
 
-					if (_initPayloadSent && (headerBitmask & ATEM_headerCmd_AckRequest) && (_hasInitialized || !(headerBitmask & ATEM_headerCmd_Resend))) { 	// Respond to request for acknowledge	(and to resends also, whatever...  
+					if ((headerBitmask & ATEM_headerCmd_AckRequest) && !(headerBitmask & ATEM_headerCmd_Resend)) { 	// Respond to request for acknowledge	(and to resends also, whatever...  
 						_wipeCleanPacketBuffer();
 						_createCommandHeader(ATEM_headerCmd_Ack, 12, _lastRemotePacketID);
 						_sendPacketBuffer(12); 
@@ -199,7 +202,7 @@ void ATEMbase::runLoop(uint16_t delayTime) {
 				        	Serial.print(_lastRemotePacketID, DEC);
 							Serial.println(F(" - ACK!"));
 						} 
-					} else if(_initPayloadSent && (headerBitmask & ATEM_headerCmd_RequestNextAfter) && _hasInitialized) {	// ATEM is requesting a previously sent package which must have dropped out of the order. We return an empty one so the ATEM doesnt' crash (which some models will, if it doesn't get an answer before another 63 commands gets sent from the controller.)
+					} else if((headerBitmask & ATEM_headerCmd_RequestNextAfter)) {	// ATEM is requesting a previously sent package which must have dropped out of the order. We return an empty one so the ATEM doesnt' crash (which some models will, if it doesn't get an answer before another 63 commands gets sent from the controller.)
 						uint8_t b1 = _packetBuffer[6];
 						uint8_t b2 = _packetBuffer[7];
 						_wipeCleanPacketBuffer();
@@ -322,6 +325,13 @@ bool ATEMbase::hasInitialized()	{
 	return _hasInitialized;
 }
 
+/**
+ * If true, the connection was rejected in the first responce, mening no empty spot.
+ */
+bool ATEMbase::isRejected() {
+	return _isRejected;
+}
+
 
 
 
@@ -348,7 +358,7 @@ void ATEMbase::_createCommandHeader(const uint8_t headerCmd, const uint16_t leng
     _packetBuffer[5] = lowByte(remotePacketID);  // Remote Packet ID, LSB
 		
     if(!(headerCmd & (ATEM_headerCmd_HelloPacket | ATEM_headerCmd_Ack | ATEM_headerCmd_RequestNextAfter))) {
-        _localPacketIdCounter++;
+        _localPacketIdCounter = (_localPacketIdCounter + 1) % ATEM_maxPacketId;
 
 //		if ((_localPacketIdCounter & 0xF) == 0xF) _localPacketIdCounter++;	// Uncommenting this line will jump the local package ID counter every 15 command - thereby introducing a stress test of the robustness of the "resent package" function from the ATEM switcher.
 
