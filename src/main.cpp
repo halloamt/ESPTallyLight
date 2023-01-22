@@ -284,24 +284,18 @@ void loop() {
   {
     // put your main code here, to run repeatedly:
     auto link = Ethernet.linkStatus();
-    //Serial.print("Link status: ");
     switch (link) {
       case Unknown:
-        //Serial.println("Unknown");
         leds[0] = CRGB::Blue;
         break;
       case LinkON:
-        //Serial.println("ON");
-        //leds[0] = CRGB::Lime;
         leds[0] = CRGB::Blue;
         break;
       case LinkOFF:
-        //Serial.println("OFF");
         leds[0] = CRGB::Red;
         break;
     }
     
-    //Serial.println(ip_to_str(switcherIP));
     if(myData.state == Searching) {
       if(switcherIP[3] == 0) {
         Serial.println("Searching...");
